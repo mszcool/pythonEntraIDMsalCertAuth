@@ -1,2 +1,6 @@
 msal==1.29.0
 requests>=2,<3
+azure-keyvault-certificates>=4.8.0
+azure-keyvault-secrets>=4.8.0
+azure-identity>=1.17.1
+cryptography>=3.3.2

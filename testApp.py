@@ -1,9 +1,16 @@
+import binascii
 import os
 import sys
 import json
 import logging
 import requests
 import msal
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.certificates import CertificateClient
+from azure.keyvault.secrets import SecretClient
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.backends import default_backend
 
 # A few constants
 AUTHORITY = "https://login.microsoftonline.com/{tenantIdOrName}"
@@ -13,12 +20,22 @@ GRAPH_ENDPOINT = "https://graph.microsoft.com/v1.0/users"
 #
 # Read the certificate files
 #
-def getPrivateKey(privateKeyFile):
+def getPrivateKey(privateKeyFileOrCertName, fromKeyVault=None):
     print ("reading certificate file: " + privateKeyFile)
     try:
-        with open(privateKeyFile, 'r') as file:
-            privateKey = file.read()
-            return privateKey
+        if fromKeyVault:
+            # Read from Azure Key Vault, the file is now the name of the certificate in Key Vault
+            credential = DefaultAzureCredential()
+            secretClient = SecretClient(vault_url=fromKeyVault, credential=credential)
+            certSecret = secretClient.get_secret(privateKeyFileOrCertName)
+            privateKey = serialization.load_pem_private_key(certSecret.value.encode(), password=None)
+            privateKeyStr = privateKey.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+            return privateKeyStr
+        else:
+            # Read from file
+            with open(privateKeyFileOrCertName, 'r') as file:
+                privateKey = file.read()
+                return privateKey
     except Exception as e:
         print ("could not read certificate file: " + str(e))
         sys.exit(1)
@@ -26,12 +43,25 @@ def getPrivateKey(privateKeyFile):
 #
 # Read the public key certificate file
 #
-def getPublicKey(publicKeyFile):
+def getPublicKey(publicKeyFileOrCertName, fromKeyVault=None):
     print ("reading public key certificate file: " + publicKeyFile)
     try:
-        with open(publicKeyFile, 'r') as file:
-            publicKey = file.read()
-            return publicKey
+        if fromKeyVault:
+            # Read from Azure Key Vault, the file is now the name of the certificate in Key Vault
+            credential = DefaultAzureCredential()
+            certClient = CertificateClient(vault_url=fromKeyVault, credential=credential)
+            cert = certClient.get_certificate(publicKeyFileOrCertName)
+            certBytes = bytes(cert.cer)
+            convertCert = x509.load_der_x509_certificate(certBytes, default_backend())
+            convertPemCert = convertCert.public_bytes(serialization.Encoding.PEM)
+            certStr = convertPemCert.decode('utf-8')
+            thumbprintStr = binascii.hexlify(cert.properties.x509_thumbprint).decode('utf-8')
+            return certStr, thumbprintStr
+        else:
+            # Read from file
+            with open(publicKeyFile, 'r') as file:
+                publicKey = file.read()
+                return publicKey, os.getenv("THUMBPRINT")
     except Exception as e:
         print ("could not read public key certificate file: " + str(e))
         sys.exit(1)
@@ -83,21 +113,34 @@ if __name__ == "__main__":
     # First, we need the authority, the client ID, the private key file, and the password for the private key file
     tenantId = os.getenv("TENANT_ID")
     clientId = os.getenv("CLIENT_ID")
-    thumbprint = os.getenv("THUMBPRINT")
-    publicKeyFile = os.getenv("PUB_FILE")
-    privateKeyFile = os.getenv("PRIV_FILE")
-    privateKeyPassword = os.getenv("PRIV_PASSWORD")
-
-    if not tenantId or not clientId or not thumbprint or not privateKeyFile:
-        print("Please provide TENANT_ID, CLIENT_ID, THUMBPRINT, PK_FILE, and PK_PASSWORD environment variables")
+    if not tenantId or not clientId:
+        print("Please provide TENANT_ID, CLIENT_ID environment variables!!")
         sys.exit(1)
+
+    privateKeyPassword = os.getenv("PRIV_PASSWORD")
+    
+    keyVault = os.getenv("KEY_VAULT")
+    if keyVault:
+        privateKeyFile = os.getenv("KEY_VAULT_CERT_NAME")
+        publicKeyFile = privateKeyFile
+        if not keyVault or not privateKeyFile:
+            print("Please provide KEY_VAULT and KEY_VAULT_CERT_NAME environment variables!!")
+            sys.exit(1)
+    else:
+        thumbprint = os.getenv("THUMBPRINT")
+        publicKeyFile = os.getenv("PUB_FILE")
+        privateKeyFile = os.getenv("PRIV_FILE")
+        if not thumbprint or not publicKeyFile or not privateKeyFile:
+            print("Please provide THUMBPRINT, PUB_FILE, PRIV_FILE, and if password-protected also PRIV_PASSWORD environment variables!!")
+            sys.exit(1)
+    
 
     # Next, create the authority URL
     authority = AUTHORITY.format(tenantIdOrName=tenantId)
 
     # First, you need to read the certificate data
-    publicKey = getPublicKey(publicKeyFile)
-    privateKey = getPrivateKey(privateKeyFile)
+    publicKey, thumbprint = getPublicKey(publicKeyFile, keyVault)
+    privateKey = getPrivateKey(privateKeyFile, keyVault)
 
     # First, acquire the token
     tokenString = acquireToken(authority, clientId, thumbprint, privateKey, privateKeyPassword)

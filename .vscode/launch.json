@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python Debugger: Current File",
+            "name": "Python Debugger: Local Current File",
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
@@ -10,9 +10,11 @@
             "env": {
                 "TENANT_ID": "",
                 "CLIENT_ID": "",
+                "KEY_VAULT": "",
+                "KEY_VAULT_CERT_NAME": "",
                 "THUMBPRINT": "",
-                "PUB_FILE": "server.crt",
-                "PRIV_FILE": "server.pem",
+                "PUB_FILE": "",
+                "PRIV_FILE": "",
                 "PRIV_PASSWORD": ""
             }
         }
