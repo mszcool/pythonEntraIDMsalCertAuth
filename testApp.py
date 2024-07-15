@@ -5,12 +5,14 @@ import json
 import logging
 import requests
 import msal
+import base64
 from azure.identity import DefaultAzureCredential
 from azure.keyvault.certificates import CertificateClient
 from azure.keyvault.secrets import SecretClient
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.backends import default_backend
+from cryptography.hazmat.primitives.serialization.pkcs12 import load_key_and_certificates
 
 # A few constants
 AUTHORITY = "https://login.microsoftonline.com/{tenantIdOrName}"
@@ -20,7 +22,7 @@ GRAPH_ENDPOINT = "https://graph.microsoft.com/v1.0/users"
 #
 # Read the certificate files
 #
-def getPrivateKey(privateKeyFileOrCertName, fromKeyVault=None):
+def getPrivateKey(privateKeyFileOrCertName, fromKeyVault=None, keyPassphrase=None):
     print ("reading certificate file: " + privateKeyFile)
     try:
         if fromKeyVault:
@@ -28,8 +30,14 @@ def getPrivateKey(privateKeyFileOrCertName, fromKeyVault=None):
             credential = DefaultAzureCredential()
             secretClient = SecretClient(vault_url=fromKeyVault, credential=credential)
             certSecret = secretClient.get_secret(privateKeyFileOrCertName)
-            privateKey = serialization.load_pem_private_key(certSecret.value.encode(), password=None)
-            privateKeyStr = privateKey.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+            # if the name of the certificate contains pem, then use PEM encoding, otherwise use PKCS/PFX encoding
+            if "pem" in privateKeyFileOrCertName:
+                privateKey = serialization.load_pem_private_key(certSecret.value.encode(), password=None)
+                privateKeyStr = privateKey.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
+            else:
+                pkcsData = base64.b64decode(certSecret.value.encode())
+                privKeyFromPkcs, certFromPkcs, addCertsFromPkcs = load_key_and_certificates(pkcsData, keyPassphrase, backend=default_backend())
+                privateKeyStr = privKeyFromPkcs.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.TraditionalOpenSSL, serialization.NoEncryption())
             return privateKeyStr
         else:
             # Read from file
@@ -53,6 +61,7 @@ def getPublicKey(publicKeyFileOrCertName, fromKeyVault=None):
             cert = certClient.get_certificate(publicKeyFileOrCertName)
             certBytes = bytes(cert.cer)
             convertCert = x509.load_der_x509_certificate(certBytes, default_backend())
+            # Public Key is the same for PKCS and PEM when using KeyVault to generate the item
             convertPemCert = convertCert.public_bytes(serialization.Encoding.PEM)
             certStr = convertPemCert.decode('utf-8')
             thumbprintStr = binascii.hexlify(cert.properties.x509_thumbprint).decode('utf-8')
