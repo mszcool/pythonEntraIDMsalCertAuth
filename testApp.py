@@ -78,7 +78,7 @@ def getPublicKey(publicKeyFileOrCertName, fromKeyVault=None):
 #
 # This is a simple sample for using certificate to authenticate against an App Registration in Microsoft Entra ID
 #
-def acquireToken(authority, clientId, thumbprint, privateKey,privateKeyPassword):
+def acquireToken(authority, clientId, thumbprint, publicKey, privateKey, privateKeyPassword):
     print ("acquiring token with certificate...")
     app = msal.ConfidentialClientApplication(
         clientId,
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     privateKey = getPrivateKey(privateKeyFile, keyVault)
 
     # First, acquire the token
-    tokenString = acquireToken(authority, clientId, thumbprint, privateKey, privateKeyPassword)
+    tokenString = acquireToken(authority, clientId, thumbprint, publicKey, privateKey, privateKeyPassword)
     
     # Then call the token to retrieve users from Graph API
     callGraphApi(tokenString)
